@@ -1,12 +1,12 @@
 """vcf2diem.py
 
 Usage: 
- vcf2diem.py -v <FILE> [-h -l]
+ vcf2diem.py -v <FILE> [-h -l -n <INT>]
 
 Options:
  -v, --vcf <FILE>                       VCF file
  -l, --location                         Print SNP location
-
+ -n, --non_callable_limit <INT>         Maximum number of noncallable genotypes per site (default = no limit)
 """
 
 # Example Command
@@ -20,8 +20,6 @@ import allel
 from tqdm import tqdm
 from timeit import default_timer as timer
 from docopt import docopt
-
-
 
 def load_vcf(vcf_f):
     query_fields = [
@@ -74,33 +72,42 @@ def get_chromosome_data(vcf_dict, chromosome_name):
 
 
 def write_diem(df, chromosome_name):
-	df.drop(columns=['non_singletons'], inplace=True)
-	if print_pos:
-	    np.savetxt(
-	        "./diem_files/snp_pos/" + str(chromosome_name) + ".snp_pos.diem.txt",
-	        df['pos'].values,
-	        fmt="%s",
-	        delimiter="",
-	    )
+    df.drop(columns=['non_singletons'], inplace=True)
+    if print_pos:
+        np.savetxt(
+            "./diem_files/snp_pos/" + str(chromosome_name) + ".snp_pos.diem.txt",
+            df['pos'].values,
+            fmt="%s",
+            delimiter="",
+        )
 
-	
-	df.drop(columns=['pos'], inplace=True)
-	np.savetxt(
+    
+    df.drop(columns=['pos'], inplace=True)
+    np.savetxt(
         "./diem_files/diem_input/" + str(chromosome_name) + ".diem.txt",
         df.values,
         fmt="%s",
         delimiter="",
     )
-	print("Chromosome " + str(chromosome_name) + "...")
+    print("Chromosome: " + str(chromosome_name) + "...")
 
 def non_singletons(df):
-	new_df = df.drop(columns=['pos'])
-	new_df.drop(columns=['S'], inplace=True)
-	new_df = new_df.replace("_", 0)
-	row_sum = new_df.sum(axis=1)
-	max_sum = len(new_df.columns)*2
-	non_singletons = [False if (x==1) or (x==max_sum-1) else True for x in row_sum]
-	return non_singletons
+    new_df = df.drop(columns=['pos'])
+    new_df.drop(columns=['S'], inplace=True)
+    unc_count_arr = (new_df.to_numpy() == '_').sum(axis=1)
+    new_df = new_df.replace("_", 0)
+    row_sum_arr = new_df.sum(axis=1)
+    max_sum_arr = [2*(new_df.shape[1]-unc_count) for unc_count in unc_count_arr]
+    non_singletons = [False if (x<=1) or (x>=max_sum-1) else True for x, max_sum in zip(row_sum_arr, max_sum_arr)]
+
+    if args["--non_callable_limit"]:
+        limit = int(args["--non_callable_limit"])
+        unc_bool_arr = unc_count_arr <= limit
+        non_singletons_pass = np.logical_and(non_singletons, unc_bool_arr)
+        return non_singletons_pass
+
+    else:
+        return non_singletons
 
 if __name__ == "__main__":
 
@@ -109,9 +116,9 @@ if __name__ == "__main__":
     vcf_f = args["--vcf"]
 
     if args["--location"]:
-    	print_pos = True
+        print_pos = True
     else:
-    	print_pos = False
+        print_pos = False
 
     try:
         start_time = timer()
@@ -120,8 +127,8 @@ if __name__ == "__main__":
         os.makedirs(path, exist_ok=True)
 
         if print_pos:
-        	path = os.path.join("./diem_files/snp_pos/")
-        	os.makedirs(path, exist_ok=True)
+            path = os.path.join("./diem_files/snp_pos/")
+            os.makedirs(path, exist_ok=True)
 
         vcf_dict = load_vcf(vcf_f=vcf_f)
 
