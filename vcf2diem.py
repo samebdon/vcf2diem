@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """vcf2diem.py
 
 Usage: 
