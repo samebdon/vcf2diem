@@ -7,6 +7,7 @@ Options:
  -v, --vcf <FILE>                       VCF file
  -l, --location                         Print SNP location
  -n, --non_callable_limit <INT>         Maximum number of noncallable genotypes per site (default = no limit)
+ -h, --help                             Print this message
 """
 
 # Example Command
