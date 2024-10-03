@@ -3,7 +3,7 @@
 """vcf2diem.py
 
 Usage: 
- vcf2diem.py -v <FILE> [-h -l -n <INT>]
+ vcf2diem.py -v <FILE> [-h -n -l <INT>]
 
 Options:
  -v, --vcf <FILE>                       VCF file
@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import sys, os
 import allel
+import random
 from tqdm import tqdm
 from timeit import default_timer as timer
 from docopt import docopt
@@ -50,26 +51,22 @@ class GenotypeData:
         self.mask_array = mask_array
 
     def get_genotype_array(self):
-        """
-        filter out sites which are singletons, invariant, or lack homozygotes here
-        my non singletons function might be better and invariant might not matter, theres only 5 invariant sites
-        any way to count the different genotypes specifically? maybe in a dictionary?
-
-        self.mask_array = np.logical_and(self.mask_array, mask_array)
-        """
         snp_gts = self.vcf_dict["calldata/GT"][self.mask_array]
         self.genotype_array = allel.GenotypeArray(snp_gts)
-        print(self.genotype_array.is_hom())
-        sys.exit()
-
 
     def get_allele_order(self):
         """
         Currently doesnt account for ties just uses what numpy picks
         Tossing a coin would be preferable
+        Maybe possible with a sorted key?
         """
         acs = self.genotype_array.count_alleles()
+        #can i use the sorted function to get an output like argsort?
         self.acs = np.flip(acs.argsort(), axis=1) 
+        print(acs)
+        print(acs.argsort())
+        print(np.lexsort((acs, lambda v: (v, random.random())), axis=1))
+        #sorted(acs, key=lambda v: (v, random.random()))
 
 
     def map_alleles(self):
@@ -98,8 +95,9 @@ class GenotypeData:
         S = pd.DataFrame(["S"] * df.shape[0], columns=['S'])
         pos = pd.DataFrame(self.positions, columns=['pos'])
         df = pd.concat([pos, S, df], axis=1)
-        non_singletons = get_non_singletons_list(df, limit)
-        return df.loc[non_singletons, :]
+        exclusions = get_exclusions(df, limit)
+
+        return df.loc[~exclusions, :]
 
 def load_vcf(vcf_f):
     query_fields = [
@@ -133,24 +131,30 @@ def write_diem(df, chromosome_name, print_pos=True):
     )
     print(f"Chromosome: {str(chromosome_name)} written")
 
-def get_non_singletons_list(df, limit=None):
+def get_exclusions(df, limit=None):
     new_df = df.drop(columns=['pos'])
     new_df.drop(columns=['S'], inplace=True)
     unc_count_arr = (new_df.to_numpy() == '_').sum(axis=1)
     new_df = new_df.replace("_", 0)
-    row_sum_arr = new_df.sum(axis=1)
-    max_sum_arr = [2*(new_df.shape[1]-unc_count) for unc_count in unc_count_arr]
-    non_singletons = [False if (x<=1) or (x>=max_sum-1) else True for x, max_sum in zip(row_sum_arr, max_sum_arr)]
+
+    singletons = get_singletons_list(new_df, unc_count_arr, limit)
+    no_homozygotes = np.sum(new_df==0, axis=1) + np.sum(new_df==2, axis=1) == 0
+    invariants = new_df.sum(axis=1) == new_df.shape[1]*2
+
+    exclusions = np.logical_and(singletons, no_homozygotes)
+    exclusions = np.logical_and(exclusions, invariants)
 
     if limit:
         limit = int(limit)
         unc_bool_arr = unc_count_arr <= limit
-        non_singletons_pass = np.logical_and(non_singletons, unc_bool_arr)
-        return non_singletons_pass
+        exclusions = np.logical_and(exclusions, unc_bool_arr)
 
-    else:
-        return non_singletons
+    return exclusions
 
+def get_singletons_list(df, unc_count_arr, limit=None):
+    row_sum_arr = df.sum(axis=1)
+    max_sum_arr = [2*(df.shape[1]-unc_count) for unc_count in unc_count_arr]
+    return [True if (x<=1) or (x>=max_sum-1) else False for x, max_sum in zip(row_sum_arr, max_sum_arr)]
 
 def main():
     args = docopt(__doc__)
