@@ -61,11 +61,12 @@ class GenotypeData:
         Maybe possible with a sorted key?
         """
         acs = self.genotype_array.count_alleles()
+
         #can i use the sorted function to get an output like argsort?
         self.acs = np.flip(acs.argsort(), axis=1) 
-        print(acs)
-        print(acs.argsort())
-        print(np.lexsort((acs, lambda v: (v, random.random())), axis=1))
+        #print(acs)
+        #print(acs.argsort())
+        #print(np.lexsort((acs, lambda v: (v, random.random())), axis=1))
         #sorted(acs, key=lambda v: (v, random.random()))
 
 
