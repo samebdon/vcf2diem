@@ -3,12 +3,13 @@
 """vcf2diem.py
 
 Usage: 
- vcf2diem.py -v <FILE> [-h -n -l <INT>]
+ vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR>]
 
 Options:
  -v, --vcf <FILE>                       VCF file
- -n, --no_location                      Turn off SNP location printing
- -l, --non_callable_limit <INT>         Maximum number of noncallable genotypes per site (default = no limit)
+ -n, --no_location                      Supress SNP location
+ -l, --non_callable_limit <INT>         Maximum number of noncallable genotypes allowed per site (default = no limit)
+ -f, --contig-filter-string <STR>       String identifying contigs to ignore (default = None)
  -h, --help                             Print this message
 """
 
@@ -58,13 +59,13 @@ class GenotypeData:
         self.genotype_array = allel.GenotypeArray(snp_gts)
 
     def get_allele_order(self):
+        """
+        For each pos gets the indices of the sorted allele counts in descending order.
+        Ties are broken by values drawn from a random normal distribution.
+        """
         acs = self.genotype_array.count_alleles()
-        self.acs = np.flip(acs.argsort(), axis=1)
-        # print (np.flip(acs.argsort(), axis=1))
-        # self.acs = np.array([np.argsort(sorted(pos, key=lambda v: (v, random.random()))) for pos in acs])
-        # not sure if this is working
-        # print(self.acs)
-        # sys.exit()
+        rand_acs = np.random.randn(*acs.shape)
+        self.acs = np.flip(np.lexsort((rand_acs, acs), axis=1))
 
     def map_alleles(self):
         mapping = self.acs
@@ -112,6 +113,15 @@ def load_vcf(vcf_f):
     return vcf_dict
 
 
+def write_samples(samples):  # new function SJEB 03/10/24
+    np.savetxt(
+        "./diem_files/" + "sampleNames.diem.txt",
+        samples,
+        fmt="%s",
+        delimiter="",
+    )
+
+
 def write_diem(df, chromosome_name, print_pos=True):
     if print_pos:
         np.savetxt(
@@ -132,6 +142,13 @@ def write_diem(df, chromosome_name, print_pos=True):
 
 
 def get_exclusions(df, limit=None):
+    """
+    Excludes:
+        Singleton sites
+        Sites where there is not one homozygote of each variant
+        Invariant sites (all alt hom slips through in very few cases)
+        Sites where the number of missing genotypes is above the user-defined threshold
+    """
     new_df = df.drop(columns=["pos"])
     new_df.drop(columns=["S"], inplace=True)
     unc_count_arr = (new_df.to_numpy() == "_").sum(axis=1)
@@ -182,10 +199,16 @@ def main():
         vcf_dict = load_vcf(vcf_f=vcf_f)
         print(f"Loaded VCF file: {vcf_f}")
 
+        all_samples = np.array(vcf_dict["samples"])
+        write_samples(all_samples)
+
         all_contigs = np.unique(vcf_dict["variants/CHROM"])
-        chromosome_names = [
-            x for x in all_contigs if "CAM" not in x
-        ]  # need better contig filter
+        if args["--contig-filter-string"]:
+            chromosome_names = [
+                x for x in all_contigs if str(args["--contig-filter-string"]) not in x
+            ]
+        else:
+            chromosome_names = all_contigs
 
         for chromosome in chromosome_names:
             chromosome_genotype_data = GenotypeData(chromosome, vcf_dict)
