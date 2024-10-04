@@ -3,14 +3,14 @@
 """vcf2diem.py
 
 Usage: 
- vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR> -r]
+ vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR> -i]
 
 Options:
  -v, --vcf <FILE>                       VCF file
  -n, --no_location                      Supress SNP location
  -l, --non_callable_limit <INT>         Maximum number of noncallable genotypes allowed per site (default = no limit)
  -f, --contig-filter-string <STR>       String identifying contigs to ignore (default = None)
- -r, --require-homs                     Ignore sites without a ref and alt homozygote (default = False)
+ -i, --include-missing-homs             Include sites missing a ref and alt homozygote
  -h, --help                             Print this message
 """
 
@@ -215,10 +215,10 @@ def main():
             path = os.path.join("./diem_files/snp_pos/")
             os.makedirs(path, exist_ok=True)
 
-        if args["--require-homs"]:
-            exclude_missing_homs=True
-        else:
+        if args["--include-missing-home"]:
             exclude_missing_homs=False
+        else:
+            exclude_missing_homs=True
 
         vcf_dict = load_vcf(vcf_f=vcf_f)
         print(f"Loaded VCF file: {vcf_f}")
