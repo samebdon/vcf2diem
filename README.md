@@ -4,7 +4,7 @@ Usage
 
 Options:
  -v, --vcf <FILE>                       VCF file
- -n, --no_location                      Supress SNP location
+ -n, --no_location                      Suppress SNP location
  -l, --non_callable_limit <INT>         Maximum number of noncallable genotypes allowed per site (default = no limit)
  -f, --contig-filter-string <STR>       String identifying contigs to ignore (default = None)
  -r, --require-homs                     Ignore sites without a ref and alt homozygote (default = False)
