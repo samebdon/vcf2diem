@@ -3,13 +3,14 @@
 """vcf2diem.py
 
 Usage: 
- vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR>]
+ vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR> -r]
 
 Options:
  -v, --vcf <FILE>                       VCF file
  -n, --no_location                      Supress SNP location
  -l, --non_callable_limit <INT>         Maximum number of noncallable genotypes allowed per site (default = no limit)
  -f, --contig-filter-string <STR>       String identifying contigs to ignore (default = None)
+ -r, --require-homs                     Ignore sites without a ref and alt homozygote (default = False)
  -h, --help                             Print this message
 """
 
@@ -76,7 +77,7 @@ class GenotypeData:
     def get_pos(self):
         self.positions = self.vcf_dict["variants/POS"][self.mask_array]
 
-    def convert_to_diem_df(self, limit):
+    def convert_to_diem_df(self, limit, exclude_missing_homs):
         """
         Assumes the genotype array is coded so that 0 is the most frequent allele
         and 1 is the second most frequent allele.
@@ -93,8 +94,11 @@ class GenotypeData:
         S = pd.DataFrame(["S"] * df.shape[0], columns=["S"])
         pos = pd.DataFrame(self.positions, columns=["pos"])
         df = pd.concat([pos, S, df], axis=1)
-        exclusions = get_exclusions(df, limit)
+        exclusions = get_exclusions(df, limit, exclude_missing_homs)
 
+        print(df)
+        print(df.loc[~exclusions, :])
+        sys.exit()
         return df.loc[~exclusions, :]
 
 
@@ -141,25 +145,46 @@ def write_diem(df, chromosome_name, print_pos=True):
     print(f"Chromosome: {str(chromosome_name)} written")
 
 
-def get_exclusions(df, limit=None):
+def get_exclusions(df, limit=None, exclude_missing_homs=None):
     """
     Excludes:
         Singleton sites
         Sites where there is not one homozygote of each variant
         Invariant sites (all alt hom slips through in very few cases)
         Sites where the number of missing genotypes is above the user-defined threshold
+
+    Invalid lines:
+    All 0
+    All 2
+    All 0 and a 1
+    All 2 and a 1
+
+    If limit:
+    Count of _ above limit
+
+    If exclude missing homs:
+    No 0
+    No 2
     """
     new_df = df.drop(columns=["pos"])
     new_df.drop(columns=["S"], inplace=True)
     unc_count_arr = (new_df.to_numpy() == "_").sum(axis=1)
-    new_df = new_df.replace("_", 0)
+    new_df = new_df.replace("_", np.nan)
 
-    singletons = get_singletons_list(new_df, unc_count_arr, limit)
-    no_homozygotes = np.sum(new_df == 0, axis=1) + np.sum(new_df == 2, axis=1) == 0
+    singletons = get_singletons(new_df, unc_count_arr, limit)
     invariants = new_df.sum(axis=1) == new_df.shape[1] * 2
+    exclusions = np.logical_or(singletons, invariants)
 
-    exclusions = np.logical_or(singletons, no_homozygotes)
-    exclusions = np.logical_or(exclusions, invariants)
+    if exclude_missing_homs:
+        no_ref_hom = np.sum(new_df == 0, axis=1) == 0
+        no_alt_hom = np.sum(new_df == 2, axis=1) == 0
+        missing_homs = np.logical_or(no_ref_hom, no_alt_hom)
+        exclusions = np.logical_or(exclusions, missing_homs)
+
+    #print(singletons)
+    #print(invariants)
+    #print(missing_homs)
+    #print(exclusions)
 
     if limit:
         limit = int(limit)
@@ -169,13 +194,13 @@ def get_exclusions(df, limit=None):
     return exclusions
 
 
-def get_singletons_list(df, unc_count_arr, limit=None):
+def get_singletons(df, unc_count_arr, limit=None):
     row_sum_arr = df.sum(axis=1)
     max_sum_arr = [2 * (df.shape[1] - unc_count) for unc_count in unc_count_arr]
-    return [
+    return pd.Series([
         True if (x <= 1) or (x >= max_sum - 1) else False
         for x, max_sum in zip(row_sum_arr, max_sum_arr)
-    ]
+    ])
 
 
 def main():
@@ -195,6 +220,11 @@ def main():
             print_pos = True
             path = os.path.join("./diem_files/snp_pos/")
             os.makedirs(path, exist_ok=True)
+
+        if args["--require-homs"]:
+            exclude_missing_homs=True
+        else:
+            exclude_missing_homs=False
 
         vcf_dict = load_vcf(vcf_f=vcf_f)
         print(f"Loaded VCF file: {vcf_f}")
@@ -218,7 +248,8 @@ def main():
             chromosome_genotype_data.map_alleles()  # sets most common and second most common alleles to 0 and 1, and everything else to -2
             chromosome_genotype_data.get_pos()
             diem_df = chromosome_genotype_data.convert_to_diem_df(
-                args["--non_callable_limit"]
+                args["--non_callable_limit"],
+                exclude_missing_homs
             )
             write_diem(diem_df, chromosome, print_pos)
 
