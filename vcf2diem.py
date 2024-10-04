@@ -95,10 +95,6 @@ class GenotypeData:
         pos = pd.DataFrame(self.positions, columns=["pos"])
         df = pd.concat([pos, S, df], axis=1)
         exclusions = get_exclusions(df, limit, exclude_missing_homs)
-
-        print(df)
-        print(df.loc[~exclusions, :])
-        sys.exit()
         return df.loc[~exclusions, :]
 
 
@@ -154,25 +150,27 @@ def get_exclusions(df, limit=None, exclude_missing_homs=None):
         Sites where the number of missing genotypes is above the user-defined threshold
 
     Invalid lines:
-    All 0
-    All 2
-    All 0 and a 1
-    All 2 and a 1
+        All 0
+        All 2
+        All 0 and a 1
+        All 2 and a 1
 
     If limit:
-    Count of _ above limit
+        Count of _ above limit
 
     If exclude missing homs:
-    No 0
-    No 2
+        No 0
+        No 2
     """
     new_df = df.drop(columns=["pos"])
     new_df.drop(columns=["S"], inplace=True)
     unc_count_arr = (new_df.to_numpy() == "_").sum(axis=1)
     new_df = new_df.replace("_", np.nan)
+    row_sum_arr = new_df.sum(axis=1)
+    max_sum_arr = [2 * (new_df.shape[1] - unc_count) for unc_count in unc_count_arr]
 
-    singletons = get_singletons(new_df, unc_count_arr, limit)
-    invariants = new_df.sum(axis=1) == new_df.shape[1] * 2
+    singletons = get_singletons(max_sum_arr, row_sum_arr)
+    invariants = get_invariants(new_df, max_sum_arr)
     exclusions = np.logical_or(singletons, invariants)
 
     if exclude_missing_homs:
@@ -180,11 +178,6 @@ def get_exclusions(df, limit=None, exclude_missing_homs=None):
         no_alt_hom = np.sum(new_df == 2, axis=1) == 0
         missing_homs = np.logical_or(no_ref_hom, no_alt_hom)
         exclusions = np.logical_or(exclusions, missing_homs)
-
-    #print(singletons)
-    #print(invariants)
-    #print(missing_homs)
-    #print(exclusions)
 
     if limit:
         limit = int(limit)
@@ -194,13 +187,14 @@ def get_exclusions(df, limit=None, exclude_missing_homs=None):
     return exclusions
 
 
-def get_singletons(df, unc_count_arr, limit=None):
-    row_sum_arr = df.sum(axis=1)
-    max_sum_arr = [2 * (df.shape[1] - unc_count) for unc_count in unc_count_arr]
+def get_singletons(max_sum_arr, row_sum_arr):
     return pd.Series([
-        True if (x <= 1) or (x >= max_sum - 1) else False
+        True if (x == 1) or (x == max_sum - 1) else False
         for x, max_sum in zip(row_sum_arr, max_sum_arr)
     ])
+
+def get_invariants(df, max_sum_arr):
+    return np.logical_or(df.sum(axis=1) == max_sum_arr, df.sum(axis=1) == 0) 
 
 
 def main():
