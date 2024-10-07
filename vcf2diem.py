@@ -3,20 +3,21 @@
 """vcf2diem.py
 
 Usage: 
- vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR> -i]
+ vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR> -m]
 
 Options:
  -v, --vcf <FILE>                       VCF file
- -n, --no_location                      Supress SNP location
+ -n, --no_annotations                   Suppress writing SNP annotations
  -l, --non_callable_limit <INT>         Maximum number of noncallable genotypes allowed per site (default = no limit)
  -f, --contig-filter-string <STR>       String identifying contigs to ignore (default = None)
- -i, --include-missing-homs             Include sites missing a ref and alt homozygote
+ -m, --missing-homs                     Include sites missing a ref and/or alt homozygote (default = False)
+ -c, --chunks                           Split diem input into chunks in addition to chromosomes (NOT FUNCTIONAL)
  -h, --help                             Print this message
 """
 
 # Example Command
 # mamba install -c conda-forge -c bioconda numpy pandas scikit-allel tqdm docopt
-# python vcf2diem.py -v vcf_file.vcf.gz
+# ./vcf2diem.py -v vcf_file.vcf.gz
 
 import numpy as np
 import pandas as pd
@@ -26,6 +27,16 @@ import random
 from tqdm import tqdm
 from timeit import default_timer as timer
 from docopt import docopt
+
+"""
+Feature creeps:
+
+- Ref and alt allele in annotation file
+- Reason for exclusion column
+- Option to output balanced size data chunks
+    - Easy way might be to give the option to load the chromosome data and split it into chunks
+- Write empty scaffold files
+"""
 
 
 class GenotypeData:
@@ -38,11 +49,15 @@ class GenotypeData:
         self.vcf_dict = vcf_dict
         self.mask_array = None
         self.genotype_array = None
-        self.most_common_alleles = None
-        self.second_most_common_alleles = None
+        self.acs = None
         self.positions = None
+        self.qual = None
 
     def get_mask_array(self, biallelic=False):
+        """
+        Only included SNPs
+        Non SNPs are not written to excluded
+        """
         is_chrom_array = self.vcf_dict["variants/CHROM"] == self.chromosome
         is_SNP_array = self.vcf_dict["variants/is_snp"]
 
@@ -67,6 +82,8 @@ class GenotypeData:
         acs = self.genotype_array.count_alleles()
         rand_acs = np.random.randn(*acs.shape)
         self.acs = np.flip(np.lexsort((rand_acs, acs), axis=1))
+        # Get the bases here?
+        # How to track them with the remapping?
 
     def map_alleles(self):
         mapping = self.acs
@@ -76,6 +93,9 @@ class GenotypeData:
 
     def get_pos(self):
         self.positions = self.vcf_dict["variants/POS"][self.mask_array]
+
+    def get_qual(self):
+        self.qual = self.vcf_dict["variants/QUAL"][self.mask_array]
 
     def convert_to_diem_df(self, limit, exclude_missing_homs):
         """
@@ -91,11 +111,21 @@ class GenotypeData:
 
         df = pd.DataFrame(summed_snp_ga)
         df.replace([i for i in range(-1, -10, -1)], "_", inplace=True)
-        S = pd.DataFrame(["S"] * df.shape[0], columns=["S"])
-        pos = pd.DataFrame(self.positions, columns=["pos"])
-        df = pd.concat([pos, S, df], axis=1)
         exclusions = get_exclusions(df, limit, exclude_missing_homs)
-        return df.loc[~exclusions, :]
+        # Maybe exclusions could be a column with these codes
+
+        new_cols = pd.DataFrame(
+            {
+                "pos": self.positions,
+                "qual": self.qual,
+                "S": ["S"] * df.shape[0],
+                "exclusions": exclusions,
+            }
+        )
+
+        df = pd.concat([new_cols, df], axis=1)
+
+        return df
 
 
 def load_vcf(vcf_f):
@@ -106,39 +136,48 @@ def load_vcf(vcf_f):
         "variants/POS",
         "variants/NUMALT",
         "variants/is_snp",
+        "variants/QUAL",
     ]
 
     vcf_dict = allel.read_vcf(vcf_f, fields=query_fields)
-
     return vcf_dict
 
 
-def write_samples(samples):  # new function SJEB 03/10/24
+def write_samples(samples):
     np.savetxt(
-        "./diem_files/" + "sampleNames.diem.txt",
+        "./diem_files/sampleNames.diem.txt",
         samples,
         fmt="%s",
         delimiter="",
     )
 
 
-def write_diem(df, chromosome_name, print_pos=True):
-    if print_pos:
-        np.savetxt(
-            f"./diem_files/snp_pos/{str(chromosome_name)}.snp_pos.diem.txt",
-            df["pos"].values,
-            fmt="%s",
-            delimiter="",
-        )
-
-    df.drop(columns=["pos"], inplace=True)
+def write_diem(df, chromosome_name, write_annotations=True):
     np.savetxt(
-        f"./diem_files/diem_input/{str(chromosome_name)}.diem.txt",
-        df.values,
+        f"./diem_files/diem_input/per_chromosome/{str(chromosome_name)}.diem_input.txt",
+        df.loc[df["exclusions"] == False].drop(columns=["pos"]).values,
         fmt="%s",
         delimiter="",
     )
     print(f"Chromosome: {str(chromosome_name)} written")
+
+    if write_annotations:
+        df["chrom"] = chromosome_name
+        df["start"] = df["pos"] - 1  ## VCF 1 based, BED 0 based
+
+        df.loc[df["exclusions"] == False][["chrom", "start", "pos", "qual"]].to_csv(
+            f"./diem_files/annotations/included/{str(chromosome_name)}.included.annotations.bed",
+            sep="\t",
+            header=None,
+            index=None,
+        )
+
+        df.loc[df["exclusions"] == True][["chrom", "start", "pos", "qual"]].to_csv(
+            f"./diem_files/annotations/excluded/{str(chromosome_name)}.excluded.annotations.bed",
+            sep="\t",
+            header=None,
+            index=None,
+        )
 
 
 def get_exclusions(df, limit=None, exclude_missing_homs=None):
@@ -162,21 +201,21 @@ def get_exclusions(df, limit=None, exclude_missing_homs=None):
         No 0
         No 2
     """
-    new_df = df.drop(columns=["pos"])
-    new_df.drop(columns=["S"], inplace=True)
-    unc_count_arr = (new_df.to_numpy() == "_").sum(axis=1)
-    new_df = new_df.replace("_", np.nan)
-    row_sum_arr = new_df.sum(axis=1)
-    max_sum_arr = [2 * (new_df.shape[1] - unc_count) for unc_count in unc_count_arr]
 
-    singletons = get_singletons(max_sum_arr, row_sum_arr)
-    invariants = get_invariants(new_df, max_sum_arr)
+    df = df.copy(deep=True)
+    unc_count_arr = (df.to_numpy() == "_").sum(axis=1)
+    df = df.replace("_", np.nan)
+    row_sum_arr = df.sum(axis=1)
+    max_sum_arr = [2 * (df.shape[1] - unc_count) for unc_count in unc_count_arr]
+
+    singletons = get_singletons(max_sum_arr, row_sum_arr)  # 1
+    invariants = get_invariants(df, max_sum_arr)  # 1
     exclusions = np.logical_or(singletons, invariants)
 
     if exclude_missing_homs:
-        no_ref_hom = np.sum(new_df == 0, axis=1) == 0
-        no_alt_hom = np.sum(new_df == 2, axis=1) == 0
-        missing_homs = np.logical_or(no_ref_hom, no_alt_hom)
+        no_ref_hom = np.sum(df == 0, axis=1) == 0
+        no_alt_hom = np.sum(df == 2, axis=1) == 0
+        missing_homs = np.logical_or(no_ref_hom, no_alt_hom)  # 2
         exclusions = np.logical_or(exclusions, missing_homs)
 
     if limit:
@@ -188,13 +227,16 @@ def get_exclusions(df, limit=None, exclude_missing_homs=None):
 
 
 def get_singletons(max_sum_arr, row_sum_arr):
-    return pd.Series([
-        True if (x == 1) or (x == max_sum - 1) else False
-        for x, max_sum in zip(row_sum_arr, max_sum_arr)
-    ])
+    return pd.Series(
+        [
+            True if (x == 1) or (x == max_sum - 1) else False
+            for x, max_sum in zip(row_sum_arr, max_sum_arr)
+        ]
+    )
+
 
 def get_invariants(df, max_sum_arr):
-    return np.logical_or(df.sum(axis=1) == max_sum_arr, df.sum(axis=1) == 0) 
+    return np.logical_or(df.sum(axis=1) == max_sum_arr, df.sum(axis=1) == 0)
 
 
 def main():
@@ -205,20 +247,26 @@ def main():
     try:
         start_time = timer()
 
-        path = os.path.join("./diem_files/diem_input/")
-        os.makedirs(path, exist_ok=True)
+        chr_path = os.path.join("./diem_files/diem_input/per_chromosome")
+        os.makedirs(chr_path, exist_ok=True)
 
-        if args["--no_location"]:
+        if args["--chunks"]:
+            chunk_path = os.path.join("./diem_files/diem_input/per_chunk")
+            os.makedirs(chunk_path, exist_ok=True)
+
+        if args["--no_annotations"]:
             print_pos = False
         else:
             print_pos = True
-            path = os.path.join("./diem_files/snp_pos/")
-            os.makedirs(path, exist_ok=True)
+            inc_path = os.path.join("./diem_files/annotations/included")
+            os.makedirs(inc_path, exist_ok=True)
+            excl_path = os.path.join("./diem_files/annotations/excluded")
+            os.makedirs(excl_path, exist_ok=True)
 
-        if args["--include-missing-home"]:
-            exclude_missing_homs=False
+        if args["--missing-homs"]:
+            exclude_missing_homs = False
         else:
-            exclude_missing_homs=True
+            exclude_missing_homs = True
 
         vcf_dict = load_vcf(vcf_f=vcf_f)
         print(f"Loaded VCF file: {vcf_f}")
@@ -241,9 +289,9 @@ def main():
             chromosome_genotype_data.get_allele_order()
             chromosome_genotype_data.map_alleles()  # sets most common and second most common alleles to 0 and 1, and everything else to -2
             chromosome_genotype_data.get_pos()
+            chromosome_genotype_data.get_qual()
             diem_df = chromosome_genotype_data.convert_to_diem_df(
-                args["--non_callable_limit"],
-                exclude_missing_homs
+                args["--non_callable_limit"], exclude_missing_homs
             )
             write_diem(diem_df, chromosome, print_pos)
 
