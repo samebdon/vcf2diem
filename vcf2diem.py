@@ -3,7 +3,7 @@
 """vcf2diem.py
 
 Usage: 
- vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR> -m]
+ vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR> -m -c]
 
 Options:
  -v, --vcf <FILE>                       VCF file
@@ -35,7 +35,7 @@ Feature creeps:
 - Reason for exclusion column
 - Option to output balanced size data chunks
     - Easy way might be to give the option to load the chromosome data and split it into chunks
-- Write empty scaffold files
+    - At least for now
 """
 
 
@@ -179,6 +179,16 @@ def write_diem(df, chromosome_name, write_annotations=True):
             index=None,
         )
 
+def write_empty_files(chromosome_name, write_annotations=True):
+
+    open(f"./diem_files/diem_input/per_chromosome/{str(chromosome_name)}.diem_input.txt", 'a').close()
+    print(f"Chromosome: {str(chromosome_name)} written (EMPTY)")
+
+    if write_annotations:
+
+        open(f"./diem_files/annotations/included/{str(chromosome_name)}.included.annotations.bed", 'a').close()
+        open(f"./diem_files/annotations/excluded/{str(chromosome_name)}.excluded.annotations.bed", 'a').close()
+    
 
 def get_exclusions(df, limit=None, exclude_missing_homs=None):
     """
@@ -255,9 +265,9 @@ def main():
             os.makedirs(chunk_path, exist_ok=True)
 
         if args["--no_annotations"]:
-            print_pos = False
+            write_annotations = False
         else:
-            print_pos = True
+            write_annotations = True
             inc_path = os.path.join("./diem_files/annotations/included")
             os.makedirs(inc_path, exist_ok=True)
             excl_path = os.path.join("./diem_files/annotations/excluded")
@@ -280,20 +290,26 @@ def main():
                 x for x in all_contigs if str(args["--contig-filter-string"]) not in x
             ]
         else:
-            chromosome_names = all_contigs
+            chromosome_names = all_contigs.tolist()
 
         for chromosome in chromosome_names:
             chromosome_genotype_data = GenotypeData(chromosome, vcf_dict)
             chromosome_genotype_data.get_mask_array()
             chromosome_genotype_data.get_genotype_array()
-            chromosome_genotype_data.get_allele_order()
+
+            try:
+                chromosome_genotype_data.get_allele_order()
+            except ValueError:
+                write_empty_files(chromosome, write_annotations)
+                continue
+
             chromosome_genotype_data.map_alleles()  # sets most common and second most common alleles to 0 and 1, and everything else to -2
             chromosome_genotype_data.get_pos()
             chromosome_genotype_data.get_qual()
             diem_df = chromosome_genotype_data.convert_to_diem_df(
                 args["--non_callable_limit"], exclude_missing_homs
             )
-            write_diem(diem_df, chromosome, print_pos)
+            write_diem(diem_df, chromosome, write_annotations)
 
     except KeyboardInterrupt:
         sys.stderr.write(
