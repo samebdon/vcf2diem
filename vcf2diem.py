@@ -155,7 +155,9 @@ def write_samples(samples):
 def write_diem(df, chromosome_name, write_annotations=True):
     np.savetxt(
         f"./diem_files/diem_input/per_chromosome/{str(chromosome_name)}.diem_input.txt",
-        df.loc[df["exclusions"] == False].drop(columns=["pos", "qual", "exclusions"]).values,
+        df.loc[df["exclusions"] == False]
+        .drop(columns=["pos", "qual", "exclusions"])
+        .values,
         fmt="%s",
         delimiter="",
     )
@@ -256,30 +258,29 @@ def get_singletons(max_sum_arr, row_sum_arr):
 def get_invariants(df, max_sum_arr):
     return np.logical_or(df.sum(axis=1) == max_sum_arr, df.sum(axis=1) == 0)
 
-def chunk(chr_path, chunk_path, inc_path, inc_chunk_path, num_chunks, use_bash_script=False):
-    num_total_sites = int(subprocess.run(f"wc -l {chr_path}/* | tail -n1 |  cut -f2 -d' '", 
-        shell=True,
-        capture_output=True,
-        text= True).stdout)    
-    chunksize = get_chunksize(num_chunks, num_total_sites)    
 
-    if use_bash_script:
-        bash_script = f'{os.path.dirname(os.path.realpath(__file__))}/split_into_chunks.sh'
+def chunk(chr_path, chunk_path, inc_path, inc_chunk_path, num_chunks):
+    num_total_sites = int(
         subprocess.run(
-            [bash_script, 
-            chr_path, chunk_path,
-            inc_path, inc_chunk_path,
-            str(chunksize)],
+            f"wc -l {chr_path}/* | tail -n1 |  cut -f2 -d' '",
+            shell=True,
+            executable="/bin/bash",
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    chunksize = get_chunksize(num_chunks, num_total_sites)
+    for in_path, out_path in [(chr_path, chunk_path), (inc_path, inc_chunk_path)]:
+        subprocess.run(
+            f"split -l {chunksize} -d <(cat {in_path}/*) {out_path}/chunk_",
+            shell=True,
+            executable="/bin/bash",
         )
 
-    else: # NOT WORKING DOESNT LIKE <( )
-        subprocess.run(f"split -l {chunksize} -d <(cat {chr_path}/*) {chunk_path}/chunk_",
-            shell=True)
-        subprocess.run(f"split -l {chunksize} -d <(cat {inc_path}/*) {inc_chunk_path}/chunk_",
-            shell=True)
 
 def get_chunksize(C, N):
-    return int(np.divide(N,C) + np.sum(np.remainder(N, C) > 0))
+    return int(np.divide(N, C) + np.sum(np.remainder(N, C) > 0))
+
 
 def main():
     args = docopt(__doc__)
@@ -297,9 +298,8 @@ def main():
         else:
             write_annotations = True
             inc_path = os.path.join("./diem_files/annotations/included/per_chromosome")
-            os.makedirs(inc_path, exist_ok=True)
             excl_path = os.path.join("./diem_files/annotations/excluded/per_chromosome")
-            os.makedirs(excl_path, exist_ok=True)
+            os.makedirs(inc_path, exist_ok=True), os.makedirs(excl_path, exist_ok=True)
 
         if args["--missing-homs"]:
             exclude_missing_homs = False
@@ -347,19 +347,18 @@ def main():
 
             chunk_path = os.path.join("./diem_files/diem_input/per_chunk")
             inc_chunk_path = os.path.join("./diem_files/annotations/included/per_chunk")
-            os.makedirs(chunk_path, exist_ok=True)
-            os.makedirs(inc_chunk_path, exist_ok=True)
-            
-            chunk(chr_path, chunk_path, 
-                inc_path, inc_chunk_path,
-                num_chunks=10,
-                use_bash_script=True)
+            os.makedirs(chunk_path, exist_ok=True), os.makedirs(
+                inc_chunk_path, exist_ok=True
+            )
+
+            chunk(chr_path, chunk_path, inc_path, inc_chunk_path, num_chunks=10)
 
     except KeyboardInterrupt:
         sys.stderr.write(
             "\n[X] Interrupted by user after %i seconds!\n" % (timer() - start_time)
         )
         sys.exit(-1)
+
 
 if __name__ == "__main__":
     main()
