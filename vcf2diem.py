@@ -11,7 +11,7 @@ Options:
  -l, --non_callable_limit <INT>         Maximum number of noncallable genotypes allowed per site (default = no limit)
  -f, --contig-filter-string <STR>       String identifying contigs to ignore (default = None)
  -m, --missing-homs                     Include sites missing a ref and/or alt homozygote (default = False)
- -c, --chunks                           Split diem input into chunks in addition to chromosomes (NOT FUNCTIONAL)
+ -c, --chunks                           Split diem_files/diem_input/per_chromosome into chunked files (EXPERIMENTAL)
  -h, --help                             Print this message
 """
 
@@ -24,6 +24,7 @@ import pandas as pd
 import sys, os
 import allel
 import random
+import subprocess
 from tqdm import tqdm
 from timeit import default_timer as timer
 from docopt import docopt
@@ -33,9 +34,8 @@ Feature creeps:
 
 - Ref and alt allele in annotation file
 - Reason for exclusion column
-- Option to output balanced size data chunks
-    - Easy way might be to give the option to load the chromosome data and split it into chunks
-    - At least for now
+
+- Experimental chunking option in progress
 """
 
 
@@ -155,7 +155,7 @@ def write_samples(samples):
 def write_diem(df, chromosome_name, write_annotations=True):
     np.savetxt(
         f"./diem_files/diem_input/per_chromosome/{str(chromosome_name)}.diem_input.txt",
-        df.loc[df["exclusions"] == False].drop(columns=["pos"]).values,
+        df.loc[df["exclusions"] == False].drop(columns=["pos", "qual", "exclusions"]).values,
         fmt="%s",
         delimiter="",
     )
@@ -166,29 +166,37 @@ def write_diem(df, chromosome_name, write_annotations=True):
         df["start"] = df["pos"] - 1  ## VCF 1 based, BED 0 based
 
         df.loc[df["exclusions"] == False][["chrom", "start", "pos", "qual"]].to_csv(
-            f"./diem_files/annotations/included/{str(chromosome_name)}.included.annotations.bed",
+            f"./diem_files/annotations/included/per_chromosome/{str(chromosome_name)}.included.annotations.bed",
             sep="\t",
             header=None,
             index=None,
         )
 
         df.loc[df["exclusions"] == True][["chrom", "start", "pos", "qual"]].to_csv(
-            f"./diem_files/annotations/excluded/{str(chromosome_name)}.excluded.annotations.bed",
+            f"./diem_files/annotations/excluded/per_chromosome/{str(chromosome_name)}.excluded.annotations.bed",
             sep="\t",
             header=None,
             index=None,
         )
 
-def write_empty_files(chromosome_name, write_annotations=True):
 
-    open(f"./diem_files/diem_input/per_chromosome/{str(chromosome_name)}.diem_input.txt", 'a').close()
+def write_empty_files(chromosome_name, write_annotations=True):
+    open(
+        f"./diem_files/diem_input/per_chromosome/{str(chromosome_name)}.diem_input.txt",
+        "a",
+    ).close()
     print(f"Chromosome: {str(chromosome_name)} written (EMPTY)")
 
     if write_annotations:
+        open(
+            f"./diem_files/annotations/included/per_chromosome/{str(chromosome_name)}.included.annotations.bed",
+            "a",
+        ).close()
+        open(
+            f"./diem_files/annotations/excluded/per_chromosome/{str(chromosome_name)}.excluded.annotations.bed",
+            "a",
+        ).close()
 
-        open(f"./diem_files/annotations/included/{str(chromosome_name)}.included.annotations.bed", 'a').close()
-        open(f"./diem_files/annotations/excluded/{str(chromosome_name)}.excluded.annotations.bed", 'a').close()
-    
 
 def get_exclusions(df, limit=None, exclude_missing_homs=None):
     """
@@ -260,17 +268,13 @@ def main():
         chr_path = os.path.join("./diem_files/diem_input/per_chromosome")
         os.makedirs(chr_path, exist_ok=True)
 
-        if args["--chunks"]:
-            chunk_path = os.path.join("./diem_files/diem_input/per_chunk")
-            os.makedirs(chunk_path, exist_ok=True)
-
         if args["--no_annotations"]:
             write_annotations = False
         else:
             write_annotations = True
-            inc_path = os.path.join("./diem_files/annotations/included")
+            inc_path = os.path.join("./diem_files/annotations/included/per_chromosome")
             os.makedirs(inc_path, exist_ok=True)
-            excl_path = os.path.join("./diem_files/annotations/excluded")
+            excl_path = os.path.join("./diem_files/annotations/excluded/per_chromosome")
             os.makedirs(excl_path, exist_ok=True)
 
         if args["--missing-homs"]:
@@ -310,6 +314,25 @@ def main():
                 args["--non_callable_limit"], exclude_missing_homs
             )
             write_diem(diem_df, chromosome, write_annotations)
+
+        if args["--chunks"]:
+            """
+            EXPERIMENTAL
+            """
+            print("Chunking...")
+            chunk_path = os.path.join("./diem_files/diem_input/per_chunk")
+            os.makedirs(chunk_path, exist_ok=True)
+            inc_chunk_path = os.path.join("./diem_files/annotations/included/per_chunk")
+            os.makedirs(inc_chunk_path, exist_ok=True)
+
+            bash_script = f'{os.path.dirname(os.path.realpath(__file__))}/split_into_chunks.sh'
+            numerator = 10 ## Whats the smart way to get the denominator?
+            subprocess.run(
+                [bash_script, 
+                chr_path, chunk_path,
+                inc_path, inc_chunk_path,
+                numerator],
+            )
 
     except KeyboardInterrupt:
         sys.stderr.write(
