@@ -3,7 +3,7 @@
 """vcf2diem.py
 
 Usage: 
- vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR> -m -c]
+ vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR> -m -c <INT>]
 
 Options:
  -v, --vcf <FILE>                       VCF file
@@ -11,7 +11,7 @@ Options:
  -l, --non_callable_limit <INT>         Maximum number of noncallable genotypes allowed per site (default = no limit)
  -f, --contig-filter-string <STR>       String identifying contigs to ignore (default = None)
  -m, --missing-homs                     Include sites missing a ref and/or alt homozygote (default = False)
- -c, --chunks                           EXPERIMENTAL: Split diem_files/diem_input/per_chromosome into chunked files (requires split_into_chunks.sh in the same directory as vcf2diem.py)
+ -c, --chunks <INT>                           Split diem_files/diem_input/per_chromosome into chunked files (used /bin/bash)
  -h, --help                             Print this message
 """
 
@@ -34,8 +34,7 @@ Feature creeps:
 
 - Ref and alt allele in annotation file
 - Reason for exclusion column
-
-- Experimental chunking option in progress
+- User-defined chunk number
 """
 
 
@@ -351,7 +350,7 @@ def main():
                 inc_chunk_path, exist_ok=True
             )
 
-            chunk(chr_path, chunk_path, inc_path, inc_chunk_path, num_chunks=10)
+            chunk(chr_path, chunk_path, inc_path, inc_chunk_path, num_chunks=args["--chunks"])
 
     except KeyboardInterrupt:
         sys.stderr.write(
