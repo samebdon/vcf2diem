@@ -33,6 +33,7 @@ Feature creeps:
 - Reason for exclusion column
 """
 
+
 class GenotypeData:
     def __init__(
         self,
@@ -68,8 +69,8 @@ class GenotypeData:
         self.mask_array = mask_array
 
     def get_nucleotide_array(self):
-        ref = self.vcf_dict['variants/REF'][:, None]
-        alt = self.vcf_dict['variants/ALT']
+        ref = self.vcf_dict["variants/REF"][:, None]
+        alt = self.vcf_dict["variants/ALT"]
         self.nucleotide_array = np.append(ref, alt, axis=1)[self.mask_array]
 
     def get_genotype_array(self):
@@ -86,7 +87,9 @@ class GenotypeData:
         self.allele_order = np.flip(np.lexsort((rand_acs, acs), axis=1))
 
     def get_most_frequent_nucleotides(self):
-        self.most_frequent_nucleotides = np.take_along_axis(self.nucleotide_array,self.allele_order[:,:2], axis=1)
+        self.most_frequent_nucleotides = np.take_along_axis(
+            self.nucleotide_array, self.allele_order[:, :2], axis=1
+        )
 
     def map_alleles(self):
         mapping = self.allele_order
@@ -124,8 +127,8 @@ class GenotypeData:
                 "qual": self.qual,
                 "S": ["S"] * df.shape[0],
                 "exclusions": exclusions,
-                "ref_allele": self.most_frequent_nucleotides[:,0],
-                "alt_allele": self.most_frequent_nucleotides[:,1]
+                "ref_allele": self.most_frequent_nucleotides[:, 0],
+                "alt_allele": self.most_frequent_nucleotides[:, 1],
             }
         )
 
@@ -144,7 +147,7 @@ def load_vcf(vcf_f):
         "variants/is_snp",
         "variants/QUAL",
         "variants/REF",
-        "variants/ALT"
+        "variants/ALT",
     ]
 
     vcf_dict = allel.read_vcf(vcf_f, fields=query_fields)
@@ -164,13 +167,13 @@ def write_diem(df, chromosome_name, write_annotations=True):
     np.savetxt(
         f"./diem_files/diem_input/per_chromosome/{str(chromosome_name)}.diem_input.txt",
         df.loc[df["exclusions"] == False]
-        .drop(columns=["pos", "qual", "exclusions", "ref_allele","alt_allele"])
+        .drop(columns=["pos", "qual", "exclusions", "ref_allele", "alt_allele"])
         .values,
         fmt="%s",
         delimiter="",
     )
 
-    if df.loc[df["exclusions"] == False].shape[0]==0:
+    if df.loc[df["exclusions"] == False].shape[0] == 0:
         print(f"Chromosome: {str(chromosome_name)} written (EMPTY)")
     else:
         print(f"Chromosome: {str(chromosome_name)} written")
@@ -179,7 +182,9 @@ def write_diem(df, chromosome_name, write_annotations=True):
         df["chrom"] = chromosome_name
         df["start"] = df["pos"] - 1  ## VCF 1 based, BED 0 based
 
-        df.loc[df["exclusions"] == False][["chrom", "start", "pos", "qual", "ref_allele","alt_allele"]].to_csv(
+        df.loc[df["exclusions"] == False][
+            ["chrom", "start", "pos", "qual", "ref_allele", "alt_allele"]
+        ].to_csv(
             f"./diem_files/annotations/included/per_chromosome/{str(chromosome_name)}.included.annotations.bed",
             sep="\t",
             header=None,
@@ -236,7 +241,7 @@ def get_exclusions(df, limit=None, exclude_missing_homs=None):
 
     df = df.copy(deep=True)
     unc_count_arr = (df.isin(["_"])).sum(axis=1)
-    with pd.option_context('future.no_silent_downcasting', True):
+    with pd.option_context("future.no_silent_downcasting", True):
         df = df.replace("_", np.nan)
     row_sum_arr = df.sum(axis=1)
     max_sum_arr = [2 * (df.shape[1] - unc_count) for unc_count in unc_count_arr]
@@ -290,8 +295,10 @@ def chunk(chr_path, chunk_path, inc_path, inc_chunk_path, num_chunks):
             executable="/bin/bash",
         )
 
+
 def get_chunksize(c, n):
     return int(np.divide(n, c) + np.sum(np.remainder(n, c) > 0))
+
 
 def main():
     args = docopt(__doc__)
@@ -328,7 +335,7 @@ def main():
             chromosome_names = [
                 x for x in all_contigs if str(args["--contig-filter-string"]) not in x
             ]
-            chromosome_names.append('OX359252.1')
+            chromosome_names.append("OX359252.1")
         else:
             chromosome_names = all_contigs.tolist()
 
@@ -361,7 +368,13 @@ def main():
                 inc_chunk_path, exist_ok=True
             )
 
-            chunk(chr_path, chunk_path, inc_path, inc_chunk_path, num_chunks=args["--chunks"])
+            chunk(
+                chr_path,
+                chunk_path,
+                inc_path,
+                inc_chunk_path,
+                num_chunks=args["--chunks"],
+            )
 
     except KeyboardInterrupt:
         sys.stderr.write(
@@ -372,4 +385,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
