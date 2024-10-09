@@ -11,7 +11,7 @@ Options:
  -l, --non_callable_limit <INT>         Maximum number of noncallable genotypes allowed per site (default = no limit)
  -f, --contig-filter-string <STR>       String identifying contigs to ignore (default = None)
  -m, --missing-homs                     Include sites missing a ref and/or alt homozygote (default = False)
- -c, --chunks <INT>                           Split diem_files/diem_input/per_chromosome into chunked files (used /bin/bash)
+ -c, --chunks <INT>                      Split diem_files/diem_input/per_chromosome into chunked files (used /bin/bash)
  -h, --help                             Print this message
 """
 
@@ -37,7 +37,6 @@ Feature creeps:
 - User-defined chunk number
 """
 
-
 class GenotypeData:
     def __init__(
         self,
@@ -47,8 +46,10 @@ class GenotypeData:
         self.chromosome = chromosome
         self.vcf_dict = vcf_dict
         self.mask_array = None
+        self.nucleotide_array = None
+        self.most_frequent_nucleotides = None
         self.genotype_array = None
-        self.acs = None
+        self.allele_order = None
         self.positions = None
         self.qual = None
 
@@ -57,6 +58,7 @@ class GenotypeData:
         Only included SNPs
         Non SNPs are not written to excluded
         """
+
         is_chrom_array = self.vcf_dict["variants/CHROM"] == self.chromosome
         is_SNP_array = self.vcf_dict["variants/is_snp"]
 
@@ -69,6 +71,11 @@ class GenotypeData:
 
         self.mask_array = mask_array
 
+    def get_nucleotide_array(self):
+        ref = self.vcf_dict['variants/REF'][:, None]
+        alt = self.vcf_dict['variants/ALT']
+        self.nucleotide_array = np.append(ref, alt, axis=1)[self.mask_array]
+
     def get_genotype_array(self):
         snp_gts = self.vcf_dict["calldata/GT"][self.mask_array]
         self.genotype_array = allel.GenotypeArray(snp_gts)
@@ -80,12 +87,13 @@ class GenotypeData:
         """
         acs = self.genotype_array.count_alleles()
         rand_acs = np.random.randn(*acs.shape)
-        self.acs = np.flip(np.lexsort((rand_acs, acs), axis=1))
-        # Get the bases here?
-        # How to track them with the remapping?
+        self.allele_order = np.flip(np.lexsort((rand_acs, acs), axis=1))
+
+    def get_most_frequent_nucleotides(self):
+        self.most_frequent_nucleotides = np.take_along_axis(self.nucleotide_array,self.allele_order[:,:2], axis=1)
 
     def map_alleles(self):
-        mapping = self.acs
+        mapping = self.allele_order
         if mapping.shape[1] > 2:
             mapping[:, 2:] = -2
         self.genotype_array = self.genotype_array.map_alleles(mapping)
@@ -119,6 +127,8 @@ class GenotypeData:
                 "qual": self.qual,
                 "S": ["S"] * df.shape[0],
                 "exclusions": exclusions,
+                "ref_allele": self.most_frequent_nucleotides[:,0],
+                "alt_allele": self.most_frequent_nucleotides[:,1]
             }
         )
 
@@ -136,6 +146,8 @@ def load_vcf(vcf_f):
         "variants/NUMALT",
         "variants/is_snp",
         "variants/QUAL",
+        "variants/REF",
+        "variants/ALT"
     ]
 
     vcf_dict = allel.read_vcf(vcf_f, fields=query_fields)
@@ -155,7 +167,7 @@ def write_diem(df, chromosome_name, write_annotations=True):
     np.savetxt(
         f"./diem_files/diem_input/per_chromosome/{str(chromosome_name)}.diem_input.txt",
         df.loc[df["exclusions"] == False]
-        .drop(columns=["pos", "qual", "exclusions"])
+        .drop(columns=["pos", "qual", "exclusions", "ref_allele","alt_allele"])
         .values,
         fmt="%s",
         delimiter="",
@@ -166,7 +178,7 @@ def write_diem(df, chromosome_name, write_annotations=True):
         df["chrom"] = chromosome_name
         df["start"] = df["pos"] - 1  ## VCF 1 based, BED 0 based
 
-        df.loc[df["exclusions"] == False][["chrom", "start", "pos", "qual"]].to_csv(
+        df.loc[df["exclusions"] == False][["chrom", "start", "pos", "qual", "ref_allele","alt_allele"]].to_csv(
             f"./diem_files/annotations/included/per_chromosome/{str(chromosome_name)}.included.annotations.bed",
             sep="\t",
             header=None,
@@ -276,18 +288,16 @@ def chunk(chr_path, chunk_path, inc_path, inc_chunk_path, num_chunks):
             executable="/bin/bash",
         )
 
-
-def get_chunksize(C, N):
-    return int(np.divide(N, C) + np.sum(np.remainder(N, C) > 0))
-
+def get_chunksize(c, n):
+    return int(np.divide(n, c) + np.sum(np.remainder(n, c) > 0))
 
 def main():
     args = docopt(__doc__)
 
     vcf_f = args["--vcf"]
+    start_time = timer()
 
     try:
-        start_time = timer()
 
         chr_path = os.path.join("./diem_files/diem_input/per_chromosome")
         os.makedirs(chr_path, exist_ok=True)
@@ -322,14 +332,14 @@ def main():
         for chromosome in chromosome_names:
             chromosome_genotype_data = GenotypeData(chromosome, vcf_dict)
             chromosome_genotype_data.get_mask_array()
+            chromosome_genotype_data.get_nucleotide_array()
             chromosome_genotype_data.get_genotype_array()
-
             try:
                 chromosome_genotype_data.get_allele_order()
             except ValueError:
                 write_empty_files(chromosome, write_annotations)
                 continue
-
+            chromosome_genotype_data.get_most_frequent_nucleotides()
             chromosome_genotype_data.map_alleles()  # sets most common and second most common alleles to 0 and 1, and everything else to -2
             chromosome_genotype_data.get_pos()
             chromosome_genotype_data.get_qual()
@@ -339,9 +349,6 @@ def main():
             write_diem(diem_df, chromosome, write_annotations)
 
         if args["--chunks"]:
-            """
-            EXPERIMENTAL
-            """
             print("Chunking...")
 
             chunk_path = os.path.join("./diem_files/diem_input/per_chunk")
@@ -361,3 +368,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
