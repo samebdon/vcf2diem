@@ -11,30 +11,26 @@ Options:
  -l, --non_callable_limit <INT>         Maximum number of noncallable genotypes allowed per site (default = no limit)
  -f, --contig-filter-string <STR>       String identifying contigs to ignore (default = None)
  -m, --missing-homs                     Include sites missing a ref and/or alt homozygote (default = False)
- -c, --chunks <INT>                      Split diem_files/diem_input/per_chromosome into chunked files (used /bin/bash)
+ -c, --chunks <INT>                     Split diem_files/diem_input/per_chromosome into chunked files (uses /bin/bash)
  -h, --help                             Print this message
 """
 
 # Example Command
-# mamba install -c conda-forge -c bioconda numpy pandas scikit-allel tqdm docopt
+# mamba install -c conda-forge -c bioconda numpy pandas scikit-allel docopt
 # ./vcf2diem.py -v vcf_file.vcf.gz
 
 import numpy as np
 import pandas as pd
 import sys, os
 import allel
-import random
 import subprocess
-from tqdm import tqdm
 from timeit import default_timer as timer
 from docopt import docopt
 
 """
 Feature creeps:
 
-- Ref and alt allele in annotation file
 - Reason for exclusion column
-- User-defined chunk number
 """
 
 class GenotypeData:
@@ -119,6 +115,7 @@ class GenotypeData:
         df = pd.DataFrame(summed_snp_ga)
         df.replace([i for i in range(-1, -10, -1)], "_", inplace=True)
         exclusions = get_exclusions(df, limit, exclude_missing_homs)
+
         # Maybe exclusions could be a column with these codes
 
         new_cols = pd.DataFrame(
@@ -172,7 +169,11 @@ def write_diem(df, chromosome_name, write_annotations=True):
         fmt="%s",
         delimiter="",
     )
-    print(f"Chromosome: {str(chromosome_name)} written")
+
+    if df.loc[df["exclusions"] == False].shape[0]==0:
+        print(f"Chromosome: {str(chromosome_name)} written (EMPTY)")
+    else:
+        print(f"Chromosome: {str(chromosome_name)} written")
 
     if write_annotations:
         df["chrom"] = chromosome_name
@@ -234,8 +235,9 @@ def get_exclusions(df, limit=None, exclude_missing_homs=None):
     """
 
     df = df.copy(deep=True)
-    unc_count_arr = (df.to_numpy() == "_").sum(axis=1)
-    df = df.replace("_", np.nan)
+    unc_count_arr = (df.isin(["_"])).sum(axis=1)
+    with pd.option_context('future.no_silent_downcasting', True):
+        df = df.replace("_", np.nan)
     row_sum_arr = df.sum(axis=1)
     max_sum_arr = [2 * (df.shape[1] - unc_count) for unc_count in unc_count_arr]
 
@@ -326,6 +328,7 @@ def main():
             chromosome_names = [
                 x for x in all_contigs if str(args["--contig-filter-string"]) not in x
             ]
+            chromosome_names.append('OX359252.1')
         else:
             chromosome_names = all_contigs.tolist()
 
@@ -343,6 +346,7 @@ def main():
             chromosome_genotype_data.map_alleles()  # sets most common and second most common alleles to 0 and 1, and everything else to -2
             chromosome_genotype_data.get_pos()
             chromosome_genotype_data.get_qual()
+
             diem_df = chromosome_genotype_data.convert_to_diem_df(
                 args["--non_callable_limit"], exclude_missing_homs
             )
