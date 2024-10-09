@@ -335,7 +335,6 @@ def main():
             chromosome_names = [
                 x for x in all_contigs if str(args["--contig-filter-string"]) not in x
             ]
-            chromosome_names.append("OX359252.1")
         else:
             chromosome_names = all_contigs.tolist()
 
