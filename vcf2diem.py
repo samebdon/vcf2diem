@@ -31,6 +31,18 @@ from docopt import docopt
 Feature creeps:
 
 - Reason for exclusion column
+- Lossless encoding
+ - def diem_encode(i, j): return str(i + j + 5 * (1 if abs(i - j) > 1 else 0))
+ - def diemDecode(k): 
+     if isinstance(k, int): 
+         if k < 7: 
+               ko2 = k / 2 
+               return [floor(ko2), ceil(ko2)] # Floor and Ceiling 
+         else: 
+               return sort(  divmod(k-5,3) *[3,1]  )# Quotient and Remainder 
+     else
+          return ["_", "_"] 
+
 """
 
 
