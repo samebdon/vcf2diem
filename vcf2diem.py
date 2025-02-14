@@ -32,16 +32,6 @@ Feature creeps:
 
 - Reason for exclusion column
 - Lossless encoding
- - def diem_encode(i, j): return str(i + j + 5 * (1 if abs(i - j) > 1 else 0))
- - def diemDecode(k): 
-     if isinstance(k, int): 
-         if k < 7: 
-               ko2 = k / 2 
-               return [floor(ko2), ceil(ko2)] # Floor and Ceiling 
-         else: 
-               return sort(  divmod(k-5,3) *[3,1]  )# Quotient and Remainder 
-     else
-          return ["_", "_"] 
 
 """
 
@@ -310,6 +300,19 @@ def chunk(chr_path, chunk_path, inc_path, inc_chunk_path, num_chunks):
 
 def get_chunksize(c, n):
     return int(np.divide(n, c) + np.sum(np.remainder(n, c) > 0))
+
+def diem_encode(i, j): 
+    return str(i + j + 5 * (1 if abs(i - j) > 1 else 0))
+
+def diem_decode(k): 
+     if isinstance(k, int): 
+         if k < 7: 
+               ko2 = k / 2 
+               return [floor(ko2), ceil(ko2)] # Floor and Ceiling 
+         else: 
+               return sort(  divmod(k-5,3) *[3,1]  )# Quotient and Remainder 
+     else
+          return ["_", "_"] 
 
 
 def main():
