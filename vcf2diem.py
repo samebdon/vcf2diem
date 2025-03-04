@@ -29,7 +29,6 @@ from docopt import docopt
 
 """
 Feature creeps:
-
 - Reason for exclusion column
 - Lossless encoding
  - def diem_encode(i, j): return str(i + j + 5 * (1 if abs(i - j) > 1 else 0))
@@ -70,8 +69,9 @@ class GenotypeData:
 
         is_chrom_array = self.vcf_dict["variants/CHROM"] == self.chromosome
         is_SNP_array = self.vcf_dict["variants/is_snp"]
+        is_allele_array = np.isin(self.vcf_dict["variants/REF"][:, None], ['A','T','C','G']).flatten()
 
-        mask_array = (is_SNP_array == True) & (is_chrom_array == True)
+        mask_array = (is_SNP_array == True) & (is_chrom_array == True) & (is_allele_array == True)
         if isinstance(self.vcf_dict["variants/NUMALT"][0], int) & biallelic:
             numalt_array = self.vcf_dict["variants/NUMALT"]
             mask_array = mask_array & (
@@ -354,13 +354,19 @@ def main():
             chromosome_genotype_data = GenotypeData(chromosome, vcf_dict)
             chromosome_genotype_data.get_mask_array()
             chromosome_genotype_data.get_nucleotide_array()
+            np.savetxt('chr9.nuc_arr.no_n.txt', chromosome_genotype_data.nucleotide_array, fmt='%s')
             chromosome_genotype_data.get_genotype_array()
+
             try:
                 chromosome_genotype_data.get_allele_order()
+
             except ValueError:
                 write_empty_files(chromosome, write_annotations)
                 continue
+            
             chromosome_genotype_data.get_most_frequent_nucleotides()
+
+
             chromosome_genotype_data.map_alleles()  # sets most common and second most common alleles to 0 and 1, and everything else to -2
             chromosome_genotype_data.get_pos()
             chromosome_genotype_data.get_qual()
@@ -368,7 +374,7 @@ def main():
             diem_df = chromosome_genotype_data.convert_to_diem_df(
                 args["--non_callable_limit"], exclude_missing_homs
             )
-            write_diem(diem_df, chromosome, write_annotations)
+            write_diem(diem_df, chromosome, write_annotations)                
 
         if args["--chunks"]:
             print("Chunking...")
