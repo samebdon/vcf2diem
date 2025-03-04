@@ -354,7 +354,6 @@ def main():
             chromosome_genotype_data = GenotypeData(chromosome, vcf_dict)
             chromosome_genotype_data.get_mask_array()
             chromosome_genotype_data.get_nucleotide_array()
-            np.savetxt('chr9.nuc_arr.no_n.txt', chromosome_genotype_data.nucleotide_array, fmt='%s')
             chromosome_genotype_data.get_genotype_array()
 
             try:
