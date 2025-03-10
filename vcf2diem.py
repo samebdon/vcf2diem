@@ -3,13 +3,14 @@
 """vcf2diem.py
 
 Usage: 
- vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR> -m -c <INT>]
+ vcf2diem.py -v <FILE> [-h -n -l <INT> -m -c <INT>] [-f <STR>]... [-s <STR>]...
 
 Options:
  -v, --vcf <FILE>                       VCF file
  -n, --no_annotations                   Suppress writing SNP annotations
  -l, --non_callable_limit <INT>         Maximum number of noncallable genotypes allowed per site (default = no limit)
- -f, --contig-filter-string <STR>       String identifying contigs to ignore (default = None)
+ -f, --exclude-chromosomes <STR>         Chromosome to exclude (default = None)
+ -s, --exclude-samples <STR>             Sample to exclude (default = None)
  -m, --missing-homs                     Include sites missing a ref and/or alt homozygote (default = False)
  -c, --chunks <INT>                     Split diem_files/diem_input/per_chromosome into chunked files (uses /bin/bash)
  -h, --help                             Print this message
@@ -17,7 +18,7 @@ Options:
 
 # Example Command
 # mamba install -c conda-forge -c bioconda numpy pandas scikit-allel docopt
-# ./vcf2diem.py -v vcf_file.vcf.gz
+# ./vcf2diem.py -v vcf_file.vcf.gz -f contig_1 -s sample_1 -s sample_2
 
 import numpy as np
 import pandas as pd
@@ -29,9 +30,19 @@ from docopt import docopt
 
 """
 Feature creeps:
-
+- Re-encode reference N's 
 - Reason for exclusion column
 - Lossless encoding
+ - def diem_encode(i, j): return str(i + j + 5 * (1 if abs(i - j) > 1 else 0))
+ - def diemDecode(k): 
+     if isinstance(k, int): 
+         if k < 7: 
+               ko2 = k / 2 
+               return [floor(ko2), ceil(ko2)] # Floor and Ceiling 
+         else: 
+               return sort(  divmod(k-5,3) *[3,1]  )# Quotient and Remainder 
+     else
+          return ["_", "_"] 
 
 """
 
@@ -46,6 +57,7 @@ class GenotypeData:
         self.vcf_dict = vcf_dict
         self.mask_array = None
         self.nucleotide_array = None
+        self.reference_N_positions = None
         self.most_frequent_nucleotides = None
         self.genotype_array = None
         self.allele_order = None
@@ -60,8 +72,15 @@ class GenotypeData:
 
         is_chrom_array = self.vcf_dict["variants/CHROM"] == self.chromosome
         is_SNP_array = self.vcf_dict["variants/is_snp"]
+        #is_allele_array = np.isin(
+        #    self.vcf_dict["variants/REF"][:, None], ["A", "T", "C", "G"]
+        #).flatten()
 
-        mask_array = (is_SNP_array == True) & (is_chrom_array == True)
+        mask_array = (
+            (is_SNP_array == True)
+            & (is_chrom_array == True)
+            #& (is_allele_array == True)
+        )
         if isinstance(self.vcf_dict["variants/NUMALT"][0], int) & biallelic:
             numalt_array = self.vcf_dict["variants/NUMALT"]
             mask_array = mask_array & (
@@ -74,9 +93,14 @@ class GenotypeData:
         ref = self.vcf_dict["variants/REF"][:, None]
         alt = self.vcf_dict["variants/ALT"]
         self.nucleotide_array = np.append(ref, alt, axis=1)[self.mask_array]
+        self.reference_N_positions = (ref[self.mask_array] == 'N').flatten()
+        self.nucleotide_array[self.nucleotide_array == 'N'] = ''
 
     def get_genotype_array(self):
         snp_gts = self.vcf_dict["calldata/GT"][self.mask_array]
+        print(snp_gts[self.reference_N_positions])
+        snp_gts[self.reference_N_positions] = remap_ref_N_genotypes(snp_gts, self.reference_N_positions)
+        print(snp_gts[self.reference_N_positions])
         self.genotype_array = allel.GenotypeArray(snp_gts)
 
     def get_allele_order(self):
@@ -139,7 +163,7 @@ class GenotypeData:
         return df
 
 
-def load_vcf(vcf_f):
+def load_vcf(vcf_f, samples):
     query_fields = [
         "samples",
         "calldata/GT",
@@ -152,14 +176,14 @@ def load_vcf(vcf_f):
         "variants/ALT",
     ]
 
-    vcf_dict = allel.read_vcf(vcf_f, fields=query_fields)
+    vcf_dict = allel.read_vcf(vcf_f, samples=samples, fields=query_fields)
     return vcf_dict
 
 
 def write_samples(samples):
     np.savetxt(
         "./diem_files/sampleNames.diem.txt",
-        samples,
+        np.array(samples),
         fmt="%s",
         delimiter="",
     )
@@ -301,19 +325,14 @@ def chunk(chr_path, chunk_path, inc_path, inc_chunk_path, num_chunks):
 def get_chunksize(c, n):
     return int(np.divide(n, c) + np.sum(np.remainder(n, c) > 0))
 
-def diem_encode(i, j): 
-    return str(i + j + 5 * (1 if abs(i - j) > 1 else 0))
-
-def diem_decode(k): 
-     if isinstance(k, int): 
-         if k < 7: 
-               ko2 = k / 2 
-               return [floor(ko2), ceil(ko2)] # Floor and Ceiling 
-         else: 
-               return sort(  divmod(k-5,3) *[3,1]  )# Quotient and Remainder 
-     else
-          return ["_", "_"] 
-
+def remap_ref_N_genotypes(genotypes, N_positions):
+    reference_N_snps = genotypes[N_positions]
+    proxy_map = [(1, 5), (2, 6), (3, 7), (4, 8)]
+    for proxy in proxy_map:
+        reference_N_snps[reference_N_snps == proxy[0]] = proxy[1]
+    for proxy in proxy_map:
+        reference_N_snps[reference_N_snps == proxy[1]] = proxy[0]-1
+    return reference_N_snps
 
 def main():
     args = docopt(__doc__)
@@ -339,31 +358,45 @@ def main():
         else:
             exclude_missing_homs = True
 
-        vcf_dict = load_vcf(vcf_f=vcf_f)
-        print(f"Loaded VCF file: {vcf_f}")
-
-        all_samples = np.array(vcf_dict["samples"])
-        write_samples(all_samples)
-
-        all_contigs = np.unique(vcf_dict["variants/CHROM"])
-        if args["--contig-filter-string"]:
-            chromosome_names = [
-                x for x in all_contigs if str(args["--contig-filter-string"]) not in x
+        all_samples = allel.read_vcf_headers(vcf_f)[0][-1][:-1].split("\t")[9:]
+        if args["--exclude-samples"]:
+            included_samples = [
+                sample
+                for sample in all_samples
+                if sample not in args["--exclude-samples"]
             ]
         else:
-            chromosome_names = all_contigs.tolist()
+            included_samples = all_samples
 
-        for chromosome in chromosome_names:
+        write_samples(included_samples)
+        vcf_dict = load_vcf(vcf_f=vcf_f, samples=included_samples)
+        print(f"Loaded VCF file: {vcf_f}")
+
+        all_chromosomes = np.unique(vcf_dict["variants/CHROM"])
+        if args["--exclude-chromosomes"]:
+            included_chromosomes = [
+                chromosome
+                for chromosome in all_chromosomes
+                if chromosome not in args["--exclude-chromosomes"]
+            ]
+        else:
+            included_chromosomes = all_chromosomes.tolist()
+
+        for chromosome in included_chromosomes:
             chromosome_genotype_data = GenotypeData(chromosome, vcf_dict)
             chromosome_genotype_data.get_mask_array()
             chromosome_genotype_data.get_nucleotide_array()
             chromosome_genotype_data.get_genotype_array()
+
             try:
                 chromosome_genotype_data.get_allele_order()
+
             except ValueError:
                 write_empty_files(chromosome, write_annotations)
                 continue
+
             chromosome_genotype_data.get_most_frequent_nucleotides()
+
             chromosome_genotype_data.map_alleles()  # sets most common and second most common alleles to 0 and 1, and everything else to -2
             chromosome_genotype_data.get_pos()
             chromosome_genotype_data.get_qual()
