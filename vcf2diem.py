@@ -98,9 +98,7 @@ class GenotypeData:
 
     def get_genotype_array(self):
         snp_gts = self.vcf_dict["calldata/GT"][self.mask_array]
-        print(snp_gts[self.reference_N_positions])
         snp_gts[self.reference_N_positions] = remap_ref_N_genotypes(snp_gts, self.reference_N_positions)
-        print(snp_gts[self.reference_N_positions])
         self.genotype_array = allel.GenotypeArray(snp_gts)
 
     def get_allele_order(self):
