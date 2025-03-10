@@ -1,17 +1,20 @@
-Usage
+vcf2diem.py
 ```
-  vcf2diem.py -v <FILE> [-h -n -l <INT> -f <STR> -m -c]
+Usage: 
+ vcf2diem.py -v <FILE> [-h -n -l <INT> -m -c <INT>] [-f <STR>]... [-s <STR>]...
 
 Options:
  -v, --vcf <FILE>                       VCF file
  -n, --no_annotations                   Suppress writing SNP annotations
  -l, --non_callable_limit <INT>         Maximum number of noncallable genotypes allowed per site (default = no limit)
- -f, --contig-filter-string <STR>       String identifying contigs to ignore (default = None)
+ -f, --exclude-chromosomes <STR>         Chromosome to exclude (default = None)
+ -s, --exclude-samples <STR>             Sample to exclude (default = None)
  -m, --missing-homs                     Include sites missing a ref and/or alt homozygote (default = False)
- -c, --chunks                           Split diem_files/diem_input/per_chromosome into chunked files (uses /bin/bash)
+ -c, --chunks <INT>                     Split diem_files/diem_input/per_chromosome into chunked files (uses /bin/bash)
  -h, --help                             Print this message
 """
 
-mamba install -c conda-forge -c bioconda numpy pandas scikit-allel tqdm docopt
-./vcf2diem.py -v your_vcf.gz
+Example Command
+mamba install -c conda-forge -c bioconda numpy pandas scikit-allel docopt
+./vcf2diem.py -v vcf_file.vcf.gz -f contig_1 -s sample_1 -s sample_2
 ```
