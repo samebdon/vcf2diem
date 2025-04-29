@@ -33,17 +33,8 @@ Feature creeps:
 - Re-encode reference N's 
 - Reason for exclusion column
 - Lossless encoding
- - def diem_encode(i, j): return str(i + j + 5 * (1 if abs(i - j) > 1 else 0))
- - def diemDecode(k): 
-     if isinstance(k, int): 
-         if k < 7: 
-               ko2 = k / 2 
-               return [floor(ko2), ceil(ko2)] # Floor and Ceiling 
-         else: 
-               return sort(  divmod(k-5,3) *[3,1]  )# Quotient and Remainder 
-     else
-          return ["_", "_"] 
-
+    - Encoding now included
+    - Are numbers tracked to bases?
 """
 
 
@@ -126,17 +117,15 @@ class GenotypeData:
     def convert_to_diem_df(self, limit, exclude_missing_homs):
         """
         Assumes the genotype array is coded so that 0 is the most frequent allele
-        and 1 is the second most frequent allele.
+        and 1 is the second most frequent allele and so on.
 
-        All other alleles are excluded!
+        Now includes diem encoding
         """
         snp_ga = self.genotype_array
-        snp_ga[snp_ga > 1] = -2
-        snp_ga[snp_ga < 0] = -2
-        summed_snp_ga = np.sum(snp_ga, axis=2)
-
+        summed_snp_ga = np.apply_along_axis(diem_encode, 2, snp_ga)
         df = pd.DataFrame(summed_snp_ga)
-        df.replace([i for i in range(-1, -10, -1)], "_", inplace=True)
+
+        # need to unencode for exclusions?
         exclusions = get_exclusions(df, limit, exclude_missing_homs)
 
         # Maybe exclusions could be a column with these codes
@@ -237,8 +226,10 @@ def write_empty_files(chromosome_name, write_annotations=True):
         ).close()
 
 
-def get_exclusions(df, limit=None, exclude_missing_homs=None):
+def get_exclusions(encoded_df, limit=None, exclude_missing_homs=None):
     """
+    Exclusions only consider the two most frequent alleles per site.
+
     Excludes:
         Singleton sites
         Sites where there is not one homozygote of each variant
@@ -259,7 +250,9 @@ def get_exclusions(df, limit=None, exclude_missing_homs=None):
         No 2
     """
 
-    df = df.copy(deep=True)
+    df = encoded_df.copy(deep=True)
+    df.replace([i for i in range(3, 10)], "_", inplace=True)
+
     unc_count_arr = (df.isin(["_"])).sum(axis=1)
     with pd.option_context("future.no_silent_downcasting", True):
         df = df.replace("_", np.nan)
@@ -318,6 +311,27 @@ def chunk(chr_path, chunk_path, inc_path, inc_chunk_path, num_chunks):
 
 def get_chunksize(c, n):
     return int(np.divide(n, c) + np.sum(np.remainder(n, c) > 0))
+
+
+def diem_encode(genotype):
+    i, j = genotype
+    if i < 0 or j < 0:
+        return "_"
+    else:
+        return int(i + j + 5 * (1 if abs(i - j) > 1 else 0))
+
+
+def diem_decode(k):
+    if isinstance(k, int):
+        if k < 7:
+            ko2 = k / 2
+            return [int(np.floor(ko2)), int(np.ceil(ko2))]  # Floor and Ceiling
+        else:
+            return sorted(
+                [divmod(k - 5, 3)[0] * 3, divmod(k - 5, 3)[1] * 1]
+            )  # Quotient and Remainder
+    else:
+        return ["_", "_"]
 
 
 def main():
