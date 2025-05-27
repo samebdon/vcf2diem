@@ -25,6 +25,7 @@ import pandas as pd
 import sys, os
 import allel
 import subprocess
+import warnings
 from timeit import default_timer as timer
 from docopt import docopt
 
@@ -121,13 +122,13 @@ class GenotypeData:
 
         Now includes diem encoding
         """
-        snp_ga = self.genotype_array
-        summed_snp_ga = np.apply_along_axis(diem_encode, 2, snp_ga)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            summed_snp_ga = np.apply_along_axis(diem_encode, 2, self.genotype_array)
+        
         df = pd.DataFrame(summed_snp_ga)
-
-        # need to unencode for exclusions?
         exclusions = get_exclusions(df, limit, exclude_missing_homs)
-
         # Maybe exclusions could be a column with these codes
 
         new_cols = pd.DataFrame(
@@ -159,7 +160,10 @@ def load_vcf(vcf_f, samples):
         "variants/ALT",
     ]
 
-    vcf_dict = allel.read_vcf(vcf_f, samples=samples, fields=query_fields)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        vcf_dict = allel.read_vcf(vcf_f, samples=samples, fields=query_fields)
+    
     return vcf_dict
 
 
@@ -198,6 +202,7 @@ def write_diem(df, chromosome_name, write_annotations=True):
             sep="\t",
             header=None,
             index=None,
+            na_rep='_'
         )
 
         df.loc[df["exclusions"] == True][["chrom", "start", "pos", "qual"]].to_csv(
@@ -205,6 +210,7 @@ def write_diem(df, chromosome_name, write_annotations=True):
             sep="\t",
             header=None,
             index=None,
+            na_rep='_'
         )
 
 
@@ -251,11 +257,13 @@ def get_exclusions(encoded_df, limit=None, exclude_missing_homs=None):
     """
 
     df = encoded_df.copy(deep=True)
-    df.replace([i for i in range(3, 10)], "_", inplace=True)
+    df.replace([i for i in range(3, 10)], np.nan, inplace=True)
 
-    unc_count_arr = (df.isin(["_"])).sum(axis=1)
-    with pd.option_context("future.no_silent_downcasting", True):
-        df = df.replace("_", np.nan)
+    unc_count_arr = (df.isna()).sum(axis=1)
+    
+    #with pd.option_context("future.no_silent_downcasting", True):
+    #    df = df.replace("_", np.nan)
+    
     row_sum_arr = df.sum(axis=1)
     max_sum_arr = [2 * (df.shape[1] - unc_count) for unc_count in unc_count_arr]
 
@@ -316,9 +324,9 @@ def get_chunksize(c, n):
 def diem_encode(genotype):
     i, j = genotype
     if i < 0 or j < 0:
-        return "_"
+        return np.nan
     else:
-        return int(i + j + 5 * (1 if abs(i - j) > 1 else 0))
+        return (i + j + 5 * (1 if abs(i - j) > 1 else 0)).astype(np.int8)
 
 
 def diem_decode(k):
@@ -358,7 +366,10 @@ def main():
         else:
             exclude_missing_homs = True
 
-        all_samples = allel.read_vcf_headers(vcf_f)[0][-1][:-1].split("\t")[9:]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            all_samples = allel.read_vcf_headers(vcf_f)[0][-1][:-1].split("\t")[9:]
+        
         if args["--exclude-samples"]:
             included_samples = [
                 sample
