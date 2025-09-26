@@ -31,6 +31,10 @@ from docopt import docopt
 
 """
 Feature creeps:
+- Check multi state sites are properly handled with exclusions
+- Output single bed file (check Stuart slides)
+- Incorporate Stuart's messy data fix
+- De-chromosome?
 - Re-encode reference N's 
 - Reason for exclusion column
 - Lossless encoding
